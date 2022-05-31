@@ -1,6 +1,7 @@
 mod plot;
-mod simple;
+mod accumulator;
+mod poseidon;
 
 fn main() {
-    simple::main();
+    accumulator::main();
 }
