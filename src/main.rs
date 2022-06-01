@@ -1,5 +1,5 @@
-mod plot;
 mod accumulator;
+mod plot;
 mod poseidon;
 
 fn main() {
