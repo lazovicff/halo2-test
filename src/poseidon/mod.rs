@@ -1,37 +1,39 @@
-use std::marker::PhantomData;
-
+mod native;
 mod params;
-mod sbox;
 
 use halo2_proofs::{
     arithmetic::FieldExt,
     circuit::{AssignedCell, Layouter, Region},
-    plonk::{Advice, Column, ConstraintSystem, Error, Expression, Fixed, Selector},
+    plonk::{Advice, Column, ConstraintSystem, Error, Expression, Fixed, Selector, VirtualCells},
     poly::Rotation,
 };
 use params::RoundParams;
-use sbox::Sbox;
+use std::marker::PhantomData;
 
 #[derive(Clone, Debug)]
 pub struct PoseidonConfig<F: FieldExt, const WIDTH: usize> {
     state: [Column<Advice>; WIDTH],
-    round_params: [Column<Fixed>; WIDTH],
+    round_constants: [Column<Fixed>; WIDTH],
     mds: [[Column<Fixed>; WIDTH]; WIDTH],
     full_round_selector: Selector,
     partial_round_selector: Selector,
     _marker: PhantomData<F>,
 }
 
-pub struct Poseidon<F: FieldExt, const WIDTH: usize, const EXP: i8, P: RoundParams<F, WIDTH, EXP>> {
+pub struct PoseidonChip<F: FieldExt, const WIDTH: usize, const EXP: i8, P>
+where
+    P: RoundParams<F, WIDTH, EXP>,
+{
     inputs: [Option<F>; WIDTH],
     _params: PhantomData<P>,
 }
 
-impl<F: FieldExt, const WIDTH: usize, const EXP: i8, P: RoundParams<F, WIDTH, EXP>>
-    Poseidon<F, WIDTH, EXP, P>
+impl<F: FieldExt, const WIDTH: usize, const EXP: i8, P> PoseidonChip<F, WIDTH, EXP, P>
+where
+    P: RoundParams<F, WIDTH, EXP>,
 {
     fn new(inputs: [Option<F>; WIDTH]) -> Self {
-        Poseidon {
+        PoseidonChip {
             inputs,
             _params: PhantomData,
         }
@@ -79,7 +81,7 @@ impl<F: FieldExt, const WIDTH: usize, const EXP: i8, P: RoundParams<F, WIDTH, EX
         for i in 0..WIDTH {
             round_cells[i] = Some(region.assign_fixed(
                 || "round_constant",
-                config.round_params[i],
+                config.round_constants[i],
                 round,
                 || Ok(round_constants[round * WIDTH + i]),
             )?);
@@ -108,6 +110,69 @@ impl<F: FieldExt, const WIDTH: usize, const EXP: i8, P: RoundParams<F, WIDTH, EX
         Ok(mds_cells.map(|vec| vec.map(|item| item.unwrap())))
     }
 
+    fn apply_round_constants(
+        state_cells: &[AssignedCell<F, F>; WIDTH],
+        round_const_cells: &[AssignedCell<F, F>; WIDTH],
+    ) -> [Option<F>; WIDTH] {
+        let mut next_state = [None; WIDTH];
+        for i in 0..WIDTH {
+            let state = &state_cells[i];
+            let round_const = &round_const_cells[i];
+            let sum = state
+                .value()
+                .and_then(|&s| round_const.value().map(|&r| s + r));
+            next_state[i] = sum;
+        }
+        next_state
+    }
+
+    fn apply_mds(
+        next_state: &[Option<F>; WIDTH],
+        mds_cells: &[[AssignedCell<F, F>; WIDTH]; WIDTH],
+    ) -> [Option<F>; WIDTH] {
+        let mut new_state = [Some(F::zero()); WIDTH];
+        // Compute mds matrix
+        for i in 0..WIDTH {
+            for j in 0..WIDTH {
+                let mds_ij = &mds_cells[i][j];
+                let m_product = next_state[j].and_then(|s| mds_ij.value().map(|&m| s * m));
+                new_state[i] = new_state[i].and_then(|a| m_product.map(|b| a + b));
+            }
+        }
+        new_state
+    }
+
+    fn apply_round_constants_expr(
+        v_cells: &mut VirtualCells<F>,
+        state: &[Column<Advice>; WIDTH],
+        round_constants: &[Column<Fixed>; WIDTH],
+    ) -> [Expression<F>; WIDTH] {
+        let mut exprs = [(); WIDTH].map(|_| Expression::Constant(F::zero()));
+        // Add round constants
+        for i in 0..WIDTH {
+            let curr_state = v_cells.query_advice(state[i], Rotation::cur());
+            let round_constant = v_cells.query_fixed(round_constants[i], Rotation::cur());
+            exprs[i] = curr_state + round_constant;
+        }
+        exprs
+    }
+
+    fn apply_mds_expr(
+        v_cells: &mut VirtualCells<F>,
+        exprs: &[Expression<F>; WIDTH],
+        mds: &[[Column<Fixed>; WIDTH]; WIDTH],
+    ) -> [Expression<F>; WIDTH] {
+        let mut new_exprs = [(); WIDTH].map(|_| Expression::Constant(F::zero()));
+        // Mat mul with MDS
+        for i in 0..WIDTH {
+            for j in 0..WIDTH {
+                let mds_ij = v_cells.query_fixed(mds[i][j], Rotation::cur());
+                new_exprs[i] = new_exprs[i].clone() + (exprs[j].clone() * mds_ij);
+            }
+        }
+        new_exprs
+    }
+
     fn full_round(
         config: &PoseidonConfig<F, WIDTH>,
         region: &mut Region<'_, F>,
@@ -127,27 +192,12 @@ impl<F: FieldExt, const WIDTH: usize, const EXP: i8, P: RoundParams<F, WIDTH, EX
             // Assign mds matrix
             let mds_cells = Self::load_mds(&config, region, round, &mds)?;
 
-            let mut next_state = [None; WIDTH];
-            // Compute full round
+            let mut next_state = Self::apply_round_constants(&state_cells, &round_const_cells);
             for i in 0..WIDTH {
-                let state = &state_cells[i];
-                let round_const = &round_const_cells[i];
-                let sum = state
-                    .value()
-                    .and_then(|&s| round_const.value().map(|&r| s + r));
-                next_state[i] = Sbox::<EXP>::permute_opt_f(sum);
+                next_state[i] = next_state[i].map(|s| P::sbox_f(s));
             }
 
-            let mut new_state = [Some(F::zero()); WIDTH];
-            // Compute mds matrix
-            for i in 0..WIDTH {
-                for j in 0..WIDTH {
-                    let mds_ij = &mds_cells[i][j];
-                    let m_product = next_state[j].and_then(|s| mds_ij.value().map(|&m| s * m));
-                    new_state[i] = new_state[i].and_then(|a| m_product.map(|b| a + b));
-                }
-            }
-            next_state = new_state;
+            next_state = Self::apply_mds(&next_state, &mds_cells);
 
             // Assign next state
             for i in 0..WIDTH {
@@ -180,27 +230,10 @@ impl<F: FieldExt, const WIDTH: usize, const EXP: i8, P: RoundParams<F, WIDTH, EX
             // Assign mds matrix
             let mds_cells = Self::load_mds(&config, region, round, &mds)?;
 
-            let mut next_state = [None; WIDTH];
-            for i in 0..WIDTH {
-                let state = &state_cells[i];
-                let round_const = &round_const_cells[i];
-                let sum = state
-                    .value()
-                    .and_then(|&s| round_const.value().map(|&r| s + r));
-                next_state[i] = sum;
-            }
-            next_state[0] = Sbox::<EXP>::permute_opt_f(next_state[0]);
+            let mut next_state = Self::apply_round_constants(&state_cells, &round_const_cells);
+            next_state[0] = next_state[0].map(|x| P::sbox_f(x));
 
-            let mut new_state = [Some(F::zero()); WIDTH];
-            // Compute mds matrix
-            for i in 0..WIDTH {
-                for j in 0..WIDTH {
-                    let mds_ij = &mds_cells[i][j];
-                    let m_product = next_state[j].and_then(|s| mds_ij.value().map(|&m| s * m));
-                    new_state[i] = new_state[i].and_then(|a| m_product.map(|b| a + b));
-                }
-            }
-            next_state = new_state;
+            next_state = Self::apply_mds(&next_state, &mds_cells);
 
             // Assign next state
             for i in 0..WIDTH {
@@ -216,8 +249,9 @@ impl<F: FieldExt, const WIDTH: usize, const EXP: i8, P: RoundParams<F, WIDTH, EX
     }
 }
 
-impl<F: FieldExt, const WIDTH: usize, const EXP: i8, P: RoundParams<F, WIDTH, EXP>>
-    Poseidon<F, WIDTH, EXP, P>
+impl<F: FieldExt, const WIDTH: usize, const EXP: i8, P> PoseidonChip<F, WIDTH, EXP, P>
+where
+    P: RoundParams<F, WIDTH, EXP>,
 {
     fn configure(meta: &mut ConstraintSystem<F>) -> PoseidonConfig<F, WIDTH> {
         let state = [(); WIDTH].map(|_| {
@@ -225,29 +259,17 @@ impl<F: FieldExt, const WIDTH: usize, const EXP: i8, P: RoundParams<F, WIDTH, EX
             meta.enable_equality(column);
             column
         });
-        let round_params = [(); WIDTH].map(|_| meta.fixed_column());
+        let round_constants = [(); WIDTH].map(|_| meta.fixed_column());
         let mds = [[(); WIDTH]; WIDTH].map(|vec| vec.map(|_| meta.fixed_column()));
         let full_round_selector = meta.selector();
         let partial_round_selector = meta.selector();
 
         meta.create_gate("full_round", |v_cells| {
-            let mut exprs = [(); WIDTH].map(|_| Expression::Constant(F::zero()));
-            // Add round constants
+            let mut exprs = Self::apply_round_constants_expr(v_cells, &state, &round_constants);
             for i in 0..WIDTH {
-                let curr_state = v_cells.query_advice(state[i], Rotation::cur());
-                let round_constant = v_cells.query_fixed(round_params[i], Rotation::cur());
-                exprs[i] = Sbox::<EXP>::permute_expr(curr_state + round_constant);
+                exprs[i] = P::sbox_expr(exprs[i].clone());
             }
-
-            let mut new_exprs = [(); WIDTH].map(|_| Expression::Constant(F::zero()));
-            // Mat mul with MDS
-            for i in 0..WIDTH {
-                for j in 0..WIDTH {
-                    let mds_ij = v_cells.query_fixed(mds[i][j], Rotation::cur());
-                    new_exprs[i] = new_exprs[i].clone() + (exprs[j].clone() * mds_ij);
-                }
-            }
-            exprs = new_exprs;
+            exprs = Self::apply_mds_expr(v_cells, &exprs, &mds);
 
             let s_cells = v_cells.query_selector(full_round_selector);
             // It should be equal to the state in next row
@@ -255,7 +277,6 @@ impl<F: FieldExt, const WIDTH: usize, const EXP: i8, P: RoundParams<F, WIDTH, EX
                 let next_state = v_cells.query_advice(state[i], Rotation::next());
                 exprs[i] = s_cells.clone() * (exprs[i].clone() - next_state);
             }
-
             exprs
         });
 
@@ -264,20 +285,12 @@ impl<F: FieldExt, const WIDTH: usize, const EXP: i8, P: RoundParams<F, WIDTH, EX
             // Add round constants
             for i in 0..WIDTH {
                 let curr_state = v_cells.query_advice(state[i], Rotation::cur());
-                let round_constant = v_cells.query_fixed(round_params[i], Rotation::cur());
+                let round_constant = v_cells.query_fixed(round_constants[i], Rotation::cur());
                 exprs[i] = curr_state + round_constant;
             }
-            exprs[0] = Sbox::<EXP>::permute_expr(exprs[0].clone());
+            exprs[0] = P::sbox_expr(exprs[0].clone());
 
-            let mut new_exprs = [(); WIDTH].map(|_| Expression::Constant(F::zero()));
-            // Mat mul with MDS
-            for i in 0..WIDTH {
-                for j in 0..WIDTH {
-                    let mds_ij = v_cells.query_fixed(mds[i][j], Rotation::cur());
-                    new_exprs[i] = new_exprs[i].clone() + (exprs[j].clone() * mds_ij);
-                }
-            }
-            exprs = new_exprs;
+            exprs = Self::apply_mds_expr(v_cells, &exprs, &mds);
 
             let s_cells = v_cells.query_selector(partial_round_selector);
             // It should be equal to the state in next row
@@ -291,7 +304,7 @@ impl<F: FieldExt, const WIDTH: usize, const EXP: i8, P: RoundParams<F, WIDTH, EX
 
         PoseidonConfig {
             state,
-            round_params,
+            round_constants,
             mds,
             full_round_selector,
             partial_round_selector,
@@ -381,7 +394,7 @@ mod test {
         plonk::{Circuit, Column, ConstraintSystem, Error, Instance},
     };
 
-    type TestPoseidon = Poseidon<Fr, 5, 5, Params5x5Bn254>;
+    type TestPoseidonChip = PoseidonChip<Fr, 5, 5, Params5x5Bn254>;
 
     #[derive(Clone)]
     struct PoseidonTesterConfig {
@@ -408,7 +421,7 @@ mod test {
         }
 
         fn configure(meta: &mut ConstraintSystem<Fr>) -> Self::Config {
-            let poseidon_config = TestPoseidon::configure(meta);
+            let poseidon_config = TestPoseidonChip::configure(meta);
             let results = meta.instance_column();
 
             meta.enable_equality(results);
@@ -424,7 +437,7 @@ mod test {
             config: Self::Config,
             mut layouter: impl Layouter<Fr>,
         ) -> Result<(), Error> {
-            let poseidon = TestPoseidon::new(self.inputs);
+            let poseidon = TestPoseidonChip::new(self.inputs);
             let result_state =
                 poseidon.synthesize(config.poseidon_config, layouter.namespace(|| "poseidon"))?;
             for i in 0..5 {
