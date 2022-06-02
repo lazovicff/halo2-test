@@ -16,7 +16,7 @@ pub trait RoundParams<F: FieldExt, const WIDTH: usize, const EXP: i8> {
             .iter()
             .map(|x| hex_to_field(x))
             .collect();
-        // assert_eq!(round_constants.len(), Self::round_constants_count());
+        assert_eq!(round_constants.len(), Self::round_constants_count());
         round_constants
     }
 
@@ -45,11 +45,11 @@ pub struct Params5x5Bn254;
 
 impl RoundParams<Fr, 5, 5> for Params5x5Bn254 {
     fn partial_rounds() -> usize {
-        1
+        60
     }
 
     fn full_rounds() -> usize {
-        2
+        8
     }
 
     fn round_constants_raw() -> Vec<&'static str> {
