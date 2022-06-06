@@ -1,6 +1,6 @@
 mod accumulator;
-mod plot;
 mod poseidon;
+mod ecdsa;
 
 fn main() {
     accumulator::main();
