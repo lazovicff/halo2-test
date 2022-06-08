@@ -1,36 +1,26 @@
-use halo2_proofs::arithmetic::{CurveAffine, FieldExt, BaseExt, Field};
+use halo2_proofs::arithmetic::{CurveAffine, BaseExt, Field, FieldExt};
 use group::prime::PrimeCurveAffine;
 use group::Curve;
+use group::ff::PrimeField;
 use rand::thread_rng;
 use std::io::Error;
 
-#[derive(Default)]
-pub struct SigData<E: CurveAffine> {
-	r: E::ScalarExt,
-	s: E::ScalarExt,
-	pk: E,
-	m_hash: E::ScalarExt
+#[derive(Default, Clone, Copy)]
+pub struct SigData<F: FieldExt> {
+	pub r: F,
+	pub s: F,
 }
 
-impl<E: CurveAffine> SigData<E> {
-	pub fn r(&self) -> E::ScalarExt {
-		self.r
-	}
+impl<F: FieldExt> SigData<F> {
+	pub fn from_repr(r: F::Repr, s: F::Repr) -> Self {
+		let r = F::from_repr(r).unwrap();
+		let s = F::from_repr(s).unwrap();
 
-	pub fn s(&self) -> E::ScalarExt {
-		self.s
-	}
-
-	pub fn pk(&self) -> E {
-		self.pk
-	}
-
-	pub fn m_hash(&self) -> E::ScalarExt {
-		self.m_hash
+		Self { r, s }
 	}
 }
 
-pub fn generate_signature<E: CurveAffine>() -> Result<SigData<E>, Error> {
+pub fn generate_signature<E: CurveAffine>() -> Result<(SigData<E::ScalarExt>, E, E::ScalarExt), Error> {
 	let mut rng = thread_rng();
 
 	// generate a valid signature
@@ -57,8 +47,6 @@ pub fn generate_signature<E: CurveAffine>() -> Result<SigData<E>, Error> {
 	let sig_data = SigData {
 		r: x_bytes_on_n,
 		s: sig_s,
-		pk,
-		m_hash,
 	};
-	Ok(sig_data)
+	Ok((sig_data, pk, m_hash))
 }

@@ -1,5 +1,5 @@
 mod native;
-mod params;
+pub mod params;
 
 use halo2_proofs::{
     arithmetic::FieldExt,
@@ -11,26 +11,25 @@ use params::RoundParams;
 use std::marker::PhantomData;
 
 #[derive(Clone, Debug)]
-pub struct PoseidonConfig<F: FieldExt, const WIDTH: usize> {
+pub struct PoseidonConfig<const WIDTH: usize> {
     state: [Column<Advice>; WIDTH],
     round_constants: [Column<Fixed>; WIDTH],
     mds: [[Column<Fixed>; WIDTH]; WIDTH],
     full_round_selector: Selector,
     partial_round_selector: Selector,
-    _marker: PhantomData<F>,
 }
 
-pub struct PoseidonChip<F: FieldExt, const WIDTH: usize, const EXP: i8, P>
+pub struct PoseidonChip<F: FieldExt, const WIDTH: usize, P>
 where
-    P: RoundParams<F, WIDTH, EXP>,
+    P: RoundParams<F, WIDTH>,
 {
     inputs: [Option<F>; WIDTH],
     _params: PhantomData<P>,
 }
 
-impl<F: FieldExt, const WIDTH: usize, const EXP: i8, P> PoseidonChip<F, WIDTH, EXP, P>
+impl<F: FieldExt, const WIDTH: usize, P> PoseidonChip<F, WIDTH, P>
 where
-    P: RoundParams<F, WIDTH, EXP>,
+    P: RoundParams<F, WIDTH>,
 {
     fn new(inputs: [Option<F>; WIDTH]) -> Self {
         PoseidonChip {
@@ -40,7 +39,7 @@ where
     }
 
     fn load_state(
-        config: &PoseidonConfig<F, WIDTH>,
+        config: &PoseidonConfig<WIDTH>,
         region: &mut Region<'_, F>,
         round: usize,
         init_state: [Option<F>; WIDTH],
@@ -58,7 +57,7 @@ where
     }
 
     fn copy_state(
-        config: &PoseidonConfig<F, WIDTH>,
+        config: &PoseidonConfig<WIDTH>,
         region: &mut Region<'_, F>,
         round: usize,
         prev_state: &[AssignedCell<F, F>; WIDTH],
@@ -72,7 +71,7 @@ where
     }
 
     fn load_round_constants(
-        config: &PoseidonConfig<F, WIDTH>,
+        config: &PoseidonConfig<WIDTH>,
         region: &mut Region<'_, F>,
         round: usize,
         round_constants: &[F],
@@ -90,7 +89,7 @@ where
     }
 
     fn load_mds(
-        config: &PoseidonConfig<F, WIDTH>,
+        config: &PoseidonConfig<WIDTH>,
         region: &mut Region<'_, F>,
         round: usize,
         mds: &[[F; WIDTH]; WIDTH],
@@ -174,7 +173,7 @@ where
     }
 
     fn full_round(
-        config: &PoseidonConfig<F, WIDTH>,
+        config: &PoseidonConfig<WIDTH>,
         region: &mut Region<'_, F>,
         num_rounds: usize,
         round_constants: &[F],
@@ -213,7 +212,7 @@ where
     }
 
     fn partial_round(
-        config: &PoseidonConfig<F, WIDTH>,
+        config: &PoseidonConfig<WIDTH>,
         region: &mut Region<'_, F>,
         num_rounds: usize,
         round_constants: &[F],
@@ -249,11 +248,11 @@ where
     }
 }
 
-impl<F: FieldExt, const WIDTH: usize, const EXP: i8, P> PoseidonChip<F, WIDTH, EXP, P>
+impl<F: FieldExt, const WIDTH: usize, P> PoseidonChip<F, WIDTH, P>
 where
-    P: RoundParams<F, WIDTH, EXP>,
+    P: RoundParams<F, WIDTH>,
 {
-    fn configure(meta: &mut ConstraintSystem<F>) -> PoseidonConfig<F, WIDTH> {
+    pub fn configure(meta: &mut ConstraintSystem<F>) -> PoseidonConfig<WIDTH> {
         let state = [(); WIDTH].map(|_| {
             let column = meta.advice_column();
             meta.enable_equality(column);
@@ -308,13 +307,12 @@ where
             mds,
             full_round_selector,
             partial_round_selector,
-            _marker: PhantomData,
         }
     }
 
     fn synthesize(
         &self,
-        config: PoseidonConfig<F, WIDTH>,
+        config: PoseidonConfig<WIDTH>,
         mut layouter: impl Layouter<F>,
     ) -> Result<[AssignedCell<F, F>; WIDTH], Error> {
         let full_rounds = P::full_rounds();
@@ -394,11 +392,11 @@ mod test {
         plonk::{Circuit, Column, ConstraintSystem, Error, Instance},
     };
 
-    type TestPoseidonChip = PoseidonChip<Fr, 5, 5, Params5x5Bn254>;
+    type TestPoseidonChip = PoseidonChip<Fr, 5, Params5x5Bn254>;
 
     #[derive(Clone)]
     struct PoseidonTesterConfig {
-        poseidon_config: PoseidonConfig<Fr, 5>,
+        poseidon_config: PoseidonConfig<5>,
         results: Column<Instance>,
     }
 

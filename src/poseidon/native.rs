@@ -4,7 +4,7 @@ use std::marker::PhantomData;
 
 pub struct Poseidon<F: FieldExt, const WIDTH: usize, const EXP: i8, P>
 where
-    P: RoundParams<F, WIDTH, EXP>,
+    P: RoundParams<F, WIDTH>,
 {
     inputs: [F; WIDTH],
     _params: PhantomData<P>,
@@ -12,7 +12,7 @@ where
 
 impl<F: FieldExt, const WIDTH: usize, const EXP: i8, P> Poseidon<F, WIDTH, EXP, P>
 where
-    P: RoundParams<F, WIDTH, EXP>,
+    P: RoundParams<F, WIDTH>,
 {
     fn new(inputs: [F; WIDTH]) -> Self {
         Poseidon {

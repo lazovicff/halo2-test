@@ -1,7 +1,7 @@
 use halo2_proofs::plonk::Expression;
 use halo2_proofs::{arithmetic::FieldExt, pairing::bn256::Fr};
 
-pub trait RoundParams<F: FieldExt, const WIDTH: usize, const EXP: i8>: Sbox<EXP> {
+pub trait RoundParams<F: FieldExt, const WIDTH: usize>: Sbox {
     fn full_rounds() -> usize;
     fn partial_rounds() -> usize;
 
@@ -31,7 +31,7 @@ pub trait RoundParams<F: FieldExt, const WIDTH: usize, const EXP: i8>: Sbox<EXP>
     fn mds_raw() -> [[&'static str; WIDTH]; WIDTH];
 }
 
-pub trait Sbox<const EXP: i8> {
+pub trait Sbox {
     fn sbox_expr<F: FieldExt>(exp: Expression<F>) -> Expression<F>;
     fn sbox_f<F: FieldExt>(f: F) -> F;
 }
@@ -49,7 +49,7 @@ pub fn hex_to_field<F: FieldExt>(s: &str) -> F {
 
 pub struct Params5x5Bn254;
 
-impl Sbox<5> for Params5x5Bn254 {
+impl Sbox for Params5x5Bn254 {
     fn sbox_expr<F: FieldExt>(exp: Expression<F>) -> Expression<F> {
         let exp2 = exp.clone() * exp.clone();
         exp2.clone() * exp2 * exp
@@ -61,7 +61,7 @@ impl Sbox<5> for Params5x5Bn254 {
     }
 }
 
-impl RoundParams<Fr, 5, 5> for Params5x5Bn254 {
+impl RoundParams<Fr, 5> for Params5x5Bn254 {
     fn partial_rounds() -> usize {
         60
     }

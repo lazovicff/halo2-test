@@ -1,90 +1,97 @@
-mod native;
-
-use ecdsa::ecdsa::{EcdsaConfig, EcdsaChip, AssignedEcdsaSig, AssignedPublicKey};
+use ecdsa::ecdsa::{AssignedEcdsaSig, AssignedPublicKey, EcdsaChip};
+use ecc::maingate::RegionCtx;
+use ecc::{EccConfig, GeneralEccChip};
 use halo2_proofs::arithmetic::CurveAffine;
-use maingate::{MainGate, RangeChip, RegionCtx, RangeConfig};
-use ecc::integer::{IntegerInstructions, NUMBER_OF_LOOKUP_LIMBS};
-use maingate::RangeInstructions;
-use maingate::halo2::{
-    circuit::{Layouter, SimpleFloorPlanner},
-    plonk::{Circuit, ConstraintSystem, Error},
-};
-use ecc::{GeneralEccChip};
-use native::SigData;
+use halo2_proofs::arithmetic::FieldExt;
+use halo2_proofs::circuit::{Layouter, SimpleFloorPlanner};
+use halo2_proofs::plonk::{Circuit, ConstraintSystem, Error};
+use integer::{IntegerInstructions, NUMBER_OF_LOOKUP_LIMBS};
+use maingate::{MainGate, MainGateConfig, RangeChip, RangeConfig, RangeInstructions};
+
+use std::marker::PhantomData;
+
+pub use self::native::SigData;
+
+mod native;
 
 const BIT_LEN_LIMB: usize = 68;
 const NUMBER_OF_LIMBS: usize = 4;
 
-#[derive(Clone)]
-struct EcdsaVerifyerConfig {
+#[derive(Clone, Debug)]
+pub struct EcdsaVerifierConfig {
+	main_gate_config: MainGateConfig,
 	range_config: RangeConfig,
-	ecdsa_config: EcdsaConfig,
 }
 
-impl EcdsaVerifyerConfig {
-	fn new(range_config: RangeConfig, ecdsa_config: EcdsaConfig) -> Self {
-		EcdsaVerifyerConfig {
-			range_config,
-			ecdsa_config,
-		}
-	}
+impl EcdsaVerifierConfig {
+	pub fn config_range<N: FieldExt>(
+		&self,
+		layouter: &mut impl Layouter<N>,
+	) -> Result<(), Error> {
+		let bit_len_lookup = BIT_LEN_LIMB / NUMBER_OF_LOOKUP_LIMBS;
+		let range_chip = RangeChip::<N>::new(self.range_config.clone(), bit_len_lookup);
+		range_chip.load_limb_range_table(layouter)?;
+		range_chip.load_overflow_range_tables(layouter)?;
 
-	pub fn range_config(&self) -> RangeConfig {
-		self.range_config.clone()
-	}
-
-	pub fn ecdsa_config(&self) -> EcdsaConfig {
-		self.ecdsa_config.clone()
+		Ok(())
 	}
 }
 
-#[derive(Default)]
-struct EcdsaVerifyer<E: CurveAffine> {
-	sig_data: SigData<E>,
-	aux_generator: E,
-    window_size: usize,
+#[derive(Default, Clone)]
+pub struct EcdsaVerifier<E: CurveAffine, N: FieldExt> {
+	sig_data: Option<SigData<E::ScalarExt>>,
+	pk: Option<E>,
+	m_hash: Option<E::ScalarExt>,
+	aux_generator: Option<E>,
+	window_size: usize,
+	_marker: PhantomData<N>,
 }
 
-impl<E: CurveAffine> EcdsaVerifyer<E> {
-	pub fn new(sig_data: SigData<E>, aux_generator: E, window_size: usize) -> Self {
-		EcdsaVerifyer {
+impl<E: CurveAffine, N: FieldExt> EcdsaVerifier<E, N> {
+	pub fn new(sig_data: Option<SigData<E::ScalarExt>>, pk: Option<E>, m_hash: Option<E::ScalarExt>, aux_generator: Option<E>) -> Self {
+		Self {
 			sig_data,
+			pk,
+			m_hash,
 			aux_generator,
-			window_size,
+			window_size: 2,
+			_marker: PhantomData,
 		}
 	}
 }
 
-impl<E: CurveAffine> Circuit<E::ScalarExt> for EcdsaVerifyer<E> {
-	type Config = EcdsaVerifyerConfig;
+impl<E: CurveAffine, N: FieldExt> Circuit<N> for EcdsaVerifier<E, N> {
+	type Config = EcdsaVerifierConfig;
 	type FloorPlanner = SimpleFloorPlanner;
 
 	fn without_witnesses(&self) -> Self {
 		Self::default()
 	}
 
-	fn configure(meta: &mut ConstraintSystem<E::ScalarExt>) -> Self::Config {
+	fn configure(meta: &mut ConstraintSystem<N>) -> Self::Config {
 		let (rns_base, rns_scalar) =
-                GeneralEccChip::<E, E::ScalarExt, NUMBER_OF_LIMBS, BIT_LEN_LIMB>::rns();
-
-		let mut overflow_bit_lengths: Vec<usize> = Vec::new();
+			GeneralEccChip::<E, N, NUMBER_OF_LIMBS, BIT_LEN_LIMB>::rns();
+		let main_gate_config = MainGate::<N>::configure(meta);
+		let mut overflow_bit_lengths: Vec<usize> = vec![];
 		overflow_bit_lengths.extend(rns_base.overflow_lengths());
 		overflow_bit_lengths.extend(rns_scalar.overflow_lengths());
-
-		let maingate_config = MainGate::configure(meta);
-		let range_config = RangeChip::configure(meta, &maingate_config, overflow_bit_lengths);
-
-		let ecds_config = EcdsaConfig::new(range_config.clone(), maingate_config);
-
-		EcdsaVerifyerConfig::new(range_config, ecds_config)
+		let range_config =
+			RangeChip::<N>::configure(meta, &main_gate_config, overflow_bit_lengths);
+		EcdsaVerifierConfig {
+			main_gate_config,
+			range_config,
+		}
 	}
 
-	fn synthesize(&self, config: Self::Config, mut layouter: impl Layouter<E::ScalarExt>) -> Result<(), Error> {
-		let mut ecc_chip = GeneralEccChip::<E, E::ScalarExt, NUMBER_OF_LIMBS, BIT_LEN_LIMB>::new(
-			config.ecdsa_config().ecc_chip_config()
+	fn synthesize(
+		&self,
+		config: Self::Config,
+		mut layouter: impl Layouter<N>,
+	) -> Result<(), Error> {
+		let mut ecc_chip = GeneralEccChip::<E, N, NUMBER_OF_LIMBS, BIT_LEN_LIMB>::new(
+			EccConfig::new(config.range_config.clone(), config.main_gate_config.clone()),
 		);
 		let scalar_chip = ecc_chip.scalar_field_chip();
-		let ecdsa_chip = EcdsaChip::new(ecc_chip.clone());
 
 		layouter.assign_region(
 			|| "assign_aux",
@@ -92,21 +99,23 @@ impl<E: CurveAffine> Circuit<E::ScalarExt> for EcdsaVerifyer<E> {
 				let offset = &mut 0;
 				let ctx = &mut RegionCtx::new(&mut region, offset);
 
-				ecc_chip.assign_aux_generator(ctx, Some(self.aux_generator))?;
+				ecc_chip.assign_aux_generator(ctx, self.aux_generator)?;
 				ecc_chip.assign_aux(ctx, self.window_size, 1)?;
 				Ok(())
 			},
 		)?;
 
+		let ecdsa_chip = EcdsaChip::new(ecc_chip.clone());
+
 		layouter.assign_region(
-			|| "verify_region",
+			|| "region 0",
 			|mut region| {
 				let offset = &mut 0;
 				let ctx = &mut RegionCtx::new(&mut region, offset);
 
-				let integer_r = ecc_chip.new_unassigned_scalar(Some(self.sig_data.r()));
-				let integer_s = ecc_chip.new_unassigned_scalar(Some(self.sig_data.s()));
-				let msg_hash = ecc_chip.new_unassigned_scalar(Some(self.sig_data.m_hash()));
+				let integer_r = ecc_chip.new_unassigned_scalar(self.sig_data.map(|s| s.r));
+				let integer_s = ecc_chip.new_unassigned_scalar(self.sig_data.map(|s| s.s));
+				let msg_hash = ecc_chip.new_unassigned_scalar(self.m_hash);
 
 				let r_assigned = scalar_chip.assign_integer(ctx, integer_r)?;
 				let s_assigned = scalar_chip.assign_integer(ctx, integer_s)?;
@@ -115,7 +124,7 @@ impl<E: CurveAffine> Circuit<E::ScalarExt> for EcdsaVerifyer<E> {
 					s: s_assigned,
 				};
 
-				let pk_in_circuit = ecc_chip.assign_point(ctx, Some(self.sig_data.pk()))?;
+				let pk_in_circuit = ecc_chip.assign_point(ctx, self.pk.map(|p| p.into()))?;
 				let pk_assigned = AssignedPublicKey {
 					point: pk_in_circuit,
 				};
@@ -124,10 +133,7 @@ impl<E: CurveAffine> Circuit<E::ScalarExt> for EcdsaVerifyer<E> {
 			},
 		)?;
 
-		let bit_len_lookup = BIT_LEN_LIMB / NUMBER_OF_LOOKUP_LIMBS;
-		let range_chip = RangeChip::<E::ScalarExt>::new(config.range_config(), bit_len_lookup);
-		range_chip.load_limb_range_table(&mut layouter)?;
-		range_chip.load_overflow_range_tables(&mut layouter)?;
+		config.config_range(&mut layouter)?;
 
 		Ok(())
 	}
@@ -137,23 +143,31 @@ impl<E: CurveAffine> Circuit<E::ScalarExt> for EcdsaVerifyer<E> {
 mod test {
 	use super::*;
 	use super::native::generate_signature;
-	use rand::thread_rng;
+	use halo2_proofs::arithmetic::CurveAffine;
 	use group::{Group, Curve};
+	use rand::thread_rng;
     use secp256k1::{Secp256k1Affine as Secp256};
 	use maingate::halo2::{
 		dev::MockProver,
+		pairing::bn256::Fr,
 	};
 
 	#[test]
 	fn test_ecdsa_verify() {
-		let mut rng = thread_rng();
-
 		let k = 20;
-		let sig_data = generate_signature::<Secp256>().unwrap();
-		let generator = <Secp256 as CurveAffine>::CurveExt::random(&mut rng).to_affine();
-		let sig_verifyer = EcdsaVerifyer::new(sig_data, generator, 2);
+		let (sig_data, pk, m_hash) = generate_signature::<Secp256>().unwrap();
+		let mut rng = thread_rng();
+		let aux_generator = <Secp256 as CurveAffine>::CurveExt::random(&mut rng).to_affine();
+		let sig_verifyer = EcdsaVerifier {
+			sig_data: Some(sig_data),
+			pk: Some(pk),
+			m_hash: Some(m_hash),
+			aux_generator: Some(aux_generator),
+			window_size: 2,
+			_marker: PhantomData,
+		};
 		let public_inputs = vec![vec![]];
-		let prover = match MockProver::run(k, &sig_verifyer, public_inputs) {
+		let prover = match MockProver::<Fr>::run(k, &sig_verifyer, public_inputs) {
 			Ok(prover) => prover,
 			Err(e) => panic!("{}", e),
 		};
