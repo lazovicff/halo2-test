@@ -20,16 +20,14 @@ impl<F: FieldExt> SigData<F> {
 	}
 }
 
-pub fn generate_signature<E: CurveAffine>() -> Result<(SigData<E::ScalarExt>, E, E::ScalarExt), Error> {
+pub fn generate_signature<E: CurveAffine>(sk: E::ScalarExt, m_hash: E::ScalarExt) -> Result<(SigData<E::ScalarExt>, E), Error> {
 	let mut rng = thread_rng();
 
 	// generate a valid signature
 	let generator = <E as PrimeCurveAffine>::generator();
-	let sk = <E as CurveAffine>::ScalarExt::random(&mut rng);
 	let pk = generator * sk;
 	let pk: E = pk.to_affine();
 
-	let m_hash = <E as CurveAffine>::ScalarExt::random(&mut rng);
 	let randomness = <E as CurveAffine>::ScalarExt::random(&mut rng);
 	let randomness_inv = randomness.invert().unwrap();
 	let sig_point = generator * randomness;
@@ -48,5 +46,5 @@ pub fn generate_signature<E: CurveAffine>() -> Result<(SigData<E::ScalarExt>, E,
 		r: x_bytes_on_n,
 		s: sig_s,
 	};
-	Ok((sig_data, pk, m_hash))
+	Ok((sig_data, pk))
 }

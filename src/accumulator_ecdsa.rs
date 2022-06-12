@@ -7,12 +7,10 @@ use halo2_proofs::circuit::{Layouter, SimpleFloorPlanner};
 use halo2_proofs::plonk::{Circuit, ConstraintSystem, Error};
 use integer::{IntegerInstructions, NUMBER_OF_LOOKUP_LIMBS};
 use maingate::{MainGate, MainGateConfig, RangeChip, RangeConfig, RangeInstructions};
-
+use maingate::UnassignedValue;
+use maingate::MainGateInstructions;
 use std::marker::PhantomData;
-
-pub use self::native::SigData;
-
-pub mod native;
+use crate::ecdsa::SigData;
 
 const BIT_LEN_LIMB: usize = 68;
 const NUMBER_OF_LIMBS: usize = 4;
@@ -37,8 +35,10 @@ impl EcdsaVerifierConfig {
 	}
 }
 
-#[derive(Default, Clone)]
+#[derive(Clone)]
 pub struct EcdsaVerifier<E: CurveAffine, N: FieldExt> {
+	lhs: [Option<N>; 4],
+	rhs: [Option<N>; 4],
 	sig_data: Option<SigData<E::ScalarExt>>,
 	pk: Option<E>,
 	m_hash: Option<E::ScalarExt>,
@@ -48,8 +48,17 @@ pub struct EcdsaVerifier<E: CurveAffine, N: FieldExt> {
 }
 
 impl<E: CurveAffine, N: FieldExt> EcdsaVerifier<E, N> {
-	pub fn new(sig_data: Option<SigData<E::ScalarExt>>, pk: Option<E>, m_hash: Option<E::ScalarExt>, aux_generator: Option<E>) -> Self {
+	pub fn new(
+		lhs: [Option<N>; 4],
+		rhs: [Option<N>; 4],
+		sig_data: Option<SigData<E::Scalar>>,
+		pk: Option<E>,
+		m_hash: Option<E::Scalar>,
+		aux_generator: Option<E>
+	) -> Self {
 		Self {
+			lhs,
+			rhs,
 			sig_data,
 			pk,
 			m_hash,
@@ -65,7 +74,16 @@ impl<E: CurveAffine, N: FieldExt> Circuit<N> for EcdsaVerifier<E, N> {
 	type FloorPlanner = SimpleFloorPlanner;
 
 	fn without_witnesses(&self) -> Self {
-		Self::default()
+		Self {
+			lhs: [None; 4],
+			rhs: [None; 4],
+			sig_data: None,
+			pk: None,
+			m_hash: None,
+			aux_generator: None,
+			window_size: self.window_size,
+			_marker: PhantomData
+		}
 	}
 
 	fn configure(meta: &mut ConstraintSystem<N>) -> Self::Config {
@@ -92,6 +110,7 @@ impl<E: CurveAffine, N: FieldExt> Circuit<N> for EcdsaVerifier<E, N> {
 			EccConfig::new(config.range_config.clone(), config.main_gate_config.clone()),
 		);
 		let scalar_chip = ecc_chip.scalar_field_chip();
+		let main_gate = MainGate::new(config.main_gate_config.clone());
 
 		layouter.assign_region(
 			|| "assign_aux",
@@ -104,6 +123,25 @@ impl<E: CurveAffine, N: FieldExt> Circuit<N> for EcdsaVerifier<E, N> {
 				Ok(())
 			},
 		)?;
+
+		let sum = layouter.assign_region(|| "acc", |mut region| {
+			let main_gate = MainGate::new(config.main_gate_config.clone());
+
+			let position = &mut 0;
+			let ctx = &mut RegionCtx::new(&mut region, position);
+			let unassigned_lhs = self.lhs.clone().map(|val| UnassignedValue::from(val));
+			let unassigned_rhs = self.rhs.clone().map(|val| UnassignedValue::from(val));
+			let assigned_lhs = unassigned_lhs.map(|val| main_gate.assign_value(ctx, &val).unwrap());
+			let assigned_rhs = unassigned_rhs.map(|val| main_gate.assign_value(ctx, &val).unwrap());
+
+			let mut sum = main_gate.assign_constant(ctx, N::zero())?;
+			for i in 0..4 {
+				let out = main_gate.mul(ctx, &assigned_lhs[i], &assigned_rhs[i])?;
+				sum = main_gate.add(ctx, &sum, &out)?;
+			}
+
+			Ok(sum)
+		})?;
 
 		let ecdsa_chip = EcdsaChip::new(ecc_chip.clone());
 
@@ -129,6 +167,8 @@ impl<E: CurveAffine, N: FieldExt> Circuit<N> for EcdsaVerifier<E, N> {
 					point: pk_in_circuit,
 				};
 				let msg_hash = scalar_chip.assign_integer(ctx, msg_hash)?;
+				main_gate.assert_equal(ctx, &msg_hash.native(), &sum)?;
+
 				ecdsa_chip.verify(ctx, &sig, &pk_assigned, &msg_hash)
 			},
 		)?;
@@ -142,8 +182,9 @@ impl<E: CurveAffine, N: FieldExt> Circuit<N> for EcdsaVerifier<E, N> {
 #[cfg(test)]
 mod test {
 	use super::*;
-	use super::native::generate_signature;
-	use halo2_proofs::arithmetic::CurveAffine;
+	use crate::ecdsa::native::generate_signature;
+	use ff::PrimeField;
+use halo2_proofs::arithmetic::CurveAffine;
 	use group::{Group, Curve};
 	use rand::thread_rng;
     use secp256k1::{Secp256k1Affine as Secp256};
@@ -154,16 +195,29 @@ mod test {
 	};
 
 	#[test]
-	fn test_ecdsa_verify() {
+	fn test_ecdsa_accumulator_verify() {
 		let k = 20;
 		let mut rng = thread_rng();
 
+		let lhs = [(); 4].map(|_| Some(Fr::random(&mut rng)));
+		let rhs = [(); 4].map(|_| Some(Fr::random(&mut rng)));
+
+		let mut sum = Fr::zero();
+		for i in 0..4 {
+			let lhs_i = lhs[i].unwrap();
+			let rhs_i = rhs[i].unwrap();
+			let out = lhs_i * rhs_i;
+			sum = sum + out;
+		}
+
 		let sk = <Secp256 as CurveAffine>::ScalarExt::random(&mut rng);
-		let m_hash = <Secp256 as CurveAffine>::ScalarExt::from(4);
+		let m_hash = <Secp256 as CurveAffine>::ScalarExt::from_repr(sum.to_repr()).unwrap();
 		let (sig_data, pk) = generate_signature::<Secp256>(sk, m_hash).unwrap();
 
 		let aux_generator = <Secp256 as CurveAffine>::CurveExt::random(&mut rng).to_affine();
 		let sig_verifyer = EcdsaVerifier {
+			lhs,
+			rhs,
 			sig_data: Some(sig_data),
 			pk: Some(pk),
 			m_hash: Some(m_hash),

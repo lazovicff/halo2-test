@@ -1,4 +1,7 @@
 mod accumulator;
+mod accumulator_wrong;
+mod accumulator_ecdsa;
+mod poseidon;
 mod ecdsa;
 
 use std::marker::PhantomData;
