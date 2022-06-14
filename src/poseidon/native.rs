@@ -95,13 +95,7 @@ where
 mod test {
 	use super::*;
 	use crate::poseidon::params::{hex_to_field, Params5x5Bn254};
-    use super::*;
-    use halo2_proofs::{
-        circuit::{Layouter, SimpleFloorPlanner},
-        dev::MockProver,
-        pairing::bn256::Fr,
-        plonk::{Circuit, Column, ConstraintSystem, Error, Instance},
-    };
+    use halo2_proofs::pairing::bn256::Fr;
 
 	type TestPoseidon = Poseidon<Fr, 5, Params5x5Bn254>;
 

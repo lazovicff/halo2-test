@@ -1,7 +1,6 @@
 use halo2_proofs::arithmetic::{CurveAffine, BaseExt, Field, FieldExt};
 use group::prime::PrimeCurveAffine;
 use group::Curve;
-use group::ff::PrimeField;
 use rand::thread_rng;
 use std::io::Error;
 

@@ -1,8 +1,5 @@
 #![feature(array_try_map)]
 
-mod accumulator;
-mod accumulator_wrong;
-mod accumulator_ecdsa;
 mod poseidon;
 mod ecdsa;
 
@@ -18,14 +15,14 @@ use maingate::{MainGate, MainGateConfig, RangeChip, RangeConfig, RangeInstructio
 use maingate::UnassignedValue;
 use maingate::MainGateInstructions;
 use poseidon::wrong::PoseidonChip;
-use poseidon::params::{Params5x5Bn254, RoundParams};
+use poseidon::params::RoundParams;
 use std::marker::PhantomData;
 use crate::ecdsa::SigData;
 
 const BIT_LEN_LIMB: usize = 68;
 const NUMBER_OF_LIMBS: usize = 4;
 
-type PoseidonChip5x5<F: FieldExt, P: RoundParams<F, 5>> = PoseidonChip<F, 5, P>;
+type PoseidonChip5x5<F, P> = PoseidonChip<F, 5, P>;
 
 #[derive(Clone, Debug)]
 pub struct EigenTrustConfig {
@@ -304,7 +301,7 @@ mod test {
 	use super::*;
 	use crate::ecdsa::native::generate_signature;
 	use ff::PrimeField;
-use halo2_proofs::arithmetic::CurveAffine;
+	use halo2_proofs::arithmetic::CurveAffine;
 	use group::{Group, Curve};
 	use rand::thread_rng;
     use secp256k1::{Secp256k1Affine as Secp256};
@@ -314,42 +311,8 @@ use halo2_proofs::arithmetic::CurveAffine;
 		pairing::bn256::Fr,
 	};
 
-	// #[test]
-	// fn test_ecdsa_accumulator_verify() {
-	// 	let k = 20;
-	// 	let mut rng = thread_rng();
+	#[test]
+	fn test_eigen_trust_verify() {
 
-	// 	let lhs = [(); 4].map(|_| Some(Fr::random(&mut rng)));
-	// 	let rhs = [(); 4].map(|_| Some(Fr::random(&mut rng)));
-
-	// 	let mut sum = Fr::zero();
-	// 	for i in 0..4 {
-	// 		let lhs_i = lhs[i].unwrap();
-	// 		let rhs_i = rhs[i].unwrap();
-	// 		let out = lhs_i * rhs_i;
-	// 		sum = sum + out;
-	// 	}
-
-	// 	let sk = <Secp256 as CurveAffine>::ScalarExt::random(&mut rng);
-	// 	let m_hash = <Secp256 as CurveAffine>::ScalarExt::from_repr(sum.to_repr()).unwrap();
-	// 	let (sig_data, pk) = generate_signature::<Secp256>(sk, m_hash).unwrap();
-
-	// 	let aux_generator = <Secp256 as CurveAffine>::CurveExt::random(&mut rng).to_affine();
-	// 	let sig_verifyer = EigenTrustCircuit {
-	// 		lhs,
-	// 		rhs,
-	// 		sig_data: Some(sig_data),
-	// 		pk: Some(pk),
-	// 		m_hash: Some(m_hash),
-	// 		aux_generator: Some(aux_generator),
-	// 		window_size: 2,
-	// 		_marker: PhantomData,
-	// 	};
-	// 	let public_inputs = vec![vec![]];
-	// 	let prover = match MockProver::<Fr>::run(k, &sig_verifyer, public_inputs) {
-	// 		Ok(prover) => prover,
-	// 		Err(e) => panic!("{}", e),
-	// 	};
-	// 	assert_eq!(prover.verify(), Ok(()));
-	// }
+	}
 }

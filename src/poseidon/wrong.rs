@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 use ecc::maingate::RegionCtx;
 use halo2_proofs::arithmetic::FieldExt;
 use halo2_proofs::plonk::Error;
-use maingate::{MainGateConfig, RangeConfig, AssignedValue, UnassignedValue, MainGate, MainGateInstructions, Assigned};
+use maingate::{MainGateConfig, AssignedValue, MainGate, MainGateInstructions};
 use super::RoundParams;
 
 pub struct PoseidonChip<F: FieldExt, const WIDTH: usize, P: RoundParams<F, WIDTH>>(MainGate<F>, PhantomData<P>);
@@ -112,15 +112,15 @@ impl<F: FieldExt, const WIDTH: usize, P: RoundParams<F, WIDTH>> PoseidonChip<F, 
 
 #[cfg(test)]
 mod test {
+	use super::*;
     use crate::poseidon::params::{hex_to_field, Params5x5Bn254};
-    use super::*;
     use halo2_proofs::{
         circuit::{Layouter, SimpleFloorPlanner},
         dev::MockProver,
         pairing::bn256::Fr,
-        plonk::{Circuit, Column, ConstraintSystem, Error, Instance},
+        plonk::{Circuit, ConstraintSystem, Error},
     };
-    use maingate::Assigned;
+    use maingate::UnassignedValue;
 
     type TestPoseidonChip = PoseidonChip<Fr, 5, Params5x5Bn254>;
 
