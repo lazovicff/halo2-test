@@ -1,5 +1,6 @@
 mod native;
 pub mod params;
+pub mod wrong;
 
 use halo2_proofs::{
     arithmetic::FieldExt,

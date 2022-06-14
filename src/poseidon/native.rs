@@ -2,7 +2,7 @@ use super::params::RoundParams;
 use halo2_proofs::arithmetic::FieldExt;
 use std::marker::PhantomData;
 
-pub struct Poseidon<F: FieldExt, const WIDTH: usize, const EXP: i8, P>
+pub struct Poseidon<F: FieldExt, const WIDTH: usize, P>
 where
     P: RoundParams<F, WIDTH>,
 {
@@ -10,7 +10,7 @@ where
     _params: PhantomData<P>,
 }
 
-impl<F: FieldExt, const WIDTH: usize, const EXP: i8, P> Poseidon<F, WIDTH, EXP, P>
+impl<F: FieldExt, const WIDTH: usize, P> Poseidon<F, WIDTH, P>
 where
     P: RoundParams<F, WIDTH>,
 {
@@ -19,14 +19,6 @@ where
             inputs,
             _params: PhantomData,
         }
-    }
-
-    fn load_round_constants(round: usize, round_consts: &[F]) -> [F; WIDTH] {
-        let mut result = [F::zero(); WIDTH];
-        for i in 0..WIDTH {
-            result[i] = round_consts[round * WIDTH + i];
-        }
-        result
     }
 
     fn apply_round_constants(state: &[F; WIDTH], round_consts: &[F; WIDTH]) -> [F; WIDTH] {
@@ -46,8 +38,8 @@ where
         for i in 0..WIDTH {
             for j in 0..WIDTH {
                 let mds_ij = &mds[i][j];
-                let m_product = state[j] + mds_ij;
-                new_state[i] = new_state[i] * m_product;
+                let m_product = state[j] * mds_ij;
+                new_state[i] = new_state[i] + m_product;
             }
         }
         new_state
@@ -70,24 +62,24 @@ where
         let third_round_constants = &round_constants[second_round_end..total_count];
 
         let mut state = self.inputs;
-        for round in 0..first_round_end {
-            let round_consts = Self::load_round_constants(round, first_round_constants);
+        for round in 0..half_full_rounds {
+            let round_consts = P::load_round_constants(round, first_round_constants);
             state = Self::apply_round_constants(&state, &round_consts);
             for i in 0..WIDTH {
                 state[i] = P::sbox_f(state[i]);
             }
-            state = Self::apply_mds(&state, &mds);
+            state = Self::apply_mds(&state, &mds);	
         }
 
-        for round in 0..second_round_end {
-            let round_consts = Self::load_round_constants(round, second_round_constants);
+        for round in 0..partial_rounds {
+            let round_consts = P::load_round_constants(round, second_round_constants);
             state = Self::apply_round_constants(&state, &round_consts);
             state[0] = P::sbox_f(state[0]);
             state = Self::apply_mds(&state, &mds);
         }
 
-        for round in 0..total_count {
-            let round_consts = Self::load_round_constants(round, third_round_constants);
+        for round in 0..half_full_rounds {
+            let round_consts = P::load_round_constants(round, third_round_constants);
             state = Self::apply_round_constants(&state, &round_consts);
             for i in 0..WIDTH {
                 state[i] = P::sbox_f(state[i]);
@@ -97,4 +89,46 @@ where
 
         state
     }
+}
+
+#[cfg(test)]
+mod test {
+	use super::*;
+	use crate::poseidon::params::{hex_to_field, Params5x5Bn254};
+    use super::*;
+    use halo2_proofs::{
+        circuit::{Layouter, SimpleFloorPlanner},
+        dev::MockProver,
+        pairing::bn256::Fr,
+        plonk::{Circuit, Column, ConstraintSystem, Error, Instance},
+    };
+
+	type TestPoseidon = Poseidon<Fr, 5, Params5x5Bn254>;
+
+	#[test]
+	fn test_native_poseidon_5x5() {
+		let inputs: [Fr; 5] = [
+            "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "0x0000000000000000000000000000000000000000000000000000000000000001",
+            "0x0000000000000000000000000000000000000000000000000000000000000002",
+            "0x0000000000000000000000000000000000000000000000000000000000000003",
+            "0x0000000000000000000000000000000000000000000000000000000000000004",
+        ]
+        .map(|n| hex_to_field(n));
+
+        let outputs: [Fr; 5] = [
+            "0x299c867db6c1fdd79dcefa40e4510b9837e60ebb1ce0663dbaa525df65250465",
+            "0x1148aaef609aa338b27dafd89bb98862d8bb2b429aceac47d86206154ffe053d",
+            "0x24febb87fed7462e23f6665ff9a0111f4044c38ee1672c1ac6b0637d34f24907",
+            "0x0eb08f6d809668a981c186beaf6110060707059576406b248e5d9cf6e78b3d3e",
+            "0x07748bc6877c9b82c8b98666ee9d0626ec7f5be4205f79ee8528ef1c4a376fc7",
+        ]
+        .map(|n| hex_to_field(n));
+
+		let poseidon = TestPoseidon::new(inputs);
+
+		let out = poseidon.permute();
+
+		assert_eq!(out, outputs);
+	}
 }
