@@ -592,6 +592,7 @@ dependencies = [
  "hex",
  "integer",
  "maingate",
+ "plonk-verifier",
  "plotters",
  "rand",
  "secp256k1",
@@ -627,6 +628,23 @@ dependencies = [
  "pasta_curves",
  "rand_core",
  "rayon",
+]
+
+[[package]]
+name = "halo2curves"
+version = "0.2.0"
+source = "git+https://github.com/privacy-scaling-explorations/halo2curves?tag=v0.2.0#bbd4cee10dbf9c51e0456ea67ec2b894b49f688c"
+dependencies = [
+ "ff 0.12.0",
+ "group 0.12.0",
+ "lazy_static",
+ "num-bigint",
+ "num-traits",
+ "pasta_curves",
+ "rand",
+ "rand_core",
+ "static_assertions",
+ "subtle",
 ]
 
 [[package]]
@@ -894,6 +912,22 @@ name = "pkg-config"
 version = "0.3.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1df8c4ec4b0627e53bdf214615ad287367e482558cf84b109250b37464dc03ae"
+
+[[package]]
+name = "plonk-verifier"
+version = "0.1.0"
+source = "git+https://github.com/han0110/plonk-verifier.git#3cc13be7c87d2b9277c1ea6ab5bfa05b793ec359"
+dependencies = [
+ "ff 0.12.0",
+ "group 0.12.0",
+ "halo2curves",
+ "hex",
+ "lazy_static",
+ "num-bigint",
+ "num-traits",
+ "rand",
+ "rand_chacha",
+]
 
 [[package]]
 name = "plotters"
