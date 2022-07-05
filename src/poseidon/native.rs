@@ -68,7 +68,7 @@ where
             for i in 0..WIDTH {
                 state[i] = P::sbox_f(state[i]);
             }
-            state = Self::apply_mds(&state, &mds);	
+            state = Self::apply_mds(&state, &mds);
         }
 
         for round in 0..partial_rounds {
@@ -93,15 +93,15 @@ where
 
 #[cfg(test)]
 mod test {
-	use super::*;
-	use crate::poseidon::params::{hex_to_field, Params5x5Bn254};
+    use super::*;
+    use crate::poseidon::params::{bn254_5x5::Params5x5Bn254, hex_to_field};
     use halo2_proofs::pairing::bn256::Fr;
 
-	type TestPoseidon = Poseidon<Fr, 5, Params5x5Bn254>;
+    type TestPoseidon = Poseidon<Fr, 5, Params5x5Bn254>;
 
-	#[test]
-	fn test_native_poseidon_5x5() {
-		let inputs: [Fr; 5] = [
+    #[test]
+    fn test_native_poseidon_5x5() {
+        let inputs: [Fr; 5] = [
             "0x0000000000000000000000000000000000000000000000000000000000000000",
             "0x0000000000000000000000000000000000000000000000000000000000000001",
             "0x0000000000000000000000000000000000000000000000000000000000000002",
@@ -119,10 +119,10 @@ mod test {
         ]
         .map(|n| hex_to_field(n));
 
-		let poseidon = TestPoseidon::new(inputs);
+        let poseidon = TestPoseidon::new(inputs);
 
-		let out = poseidon.permute();
+        let out = poseidon.permute();
 
-		assert_eq!(out, outputs);
-	}
+        assert_eq!(out, outputs);
+    }
 }

@@ -1,5 +1,6 @@
 mod native;
 pub mod params;
+pub mod transcript;
 pub mod wrong;
 
 use halo2_proofs::{
@@ -384,7 +385,7 @@ where
 
 #[cfg(test)]
 mod test {
-    use super::params::{hex_to_field, Params5x5Bn254};
+    use super::params::{bn254_5x5::Params5x5Bn254, hex_to_field};
     use super::*;
     use halo2_proofs::{
         circuit::{Layouter, SimpleFloorPlanner},

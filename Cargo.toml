@@ -17,4 +17,3 @@ ecc = { git = "https://github.com/privacy-scaling-explorations/halo2wrong.git", 
 integer = { git = "https://github.com/privacy-scaling-explorations/halo2wrong.git", default-features = false, features = ["kzg"] }
 secp256k1 = { git = "https://github.com/privacy-scaling-explorations/halo2wrong.git", default-features = false, features = ["kzg"] }
 maingate = { git = "https://github.com/privacy-scaling-explorations/halo2wrong.git", default-features = false, features = ["kzg"] }
-plonk-verifier = { git = "https://github.com/han0110/plonk-verifier.git", default-features = false }
