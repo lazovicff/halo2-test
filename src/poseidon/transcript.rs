@@ -1,27 +1,13 @@
-use halo2_proofs::transcript::{Transcript, TranscriptRead, TranscriptWrite};
+use halo2_proofs::transcript::{Transcript, TranscriptRead, TranscriptWrite, Challenge255};
+use halo2_proofs::arithmetic::CurveAffine;
+use std::marker::PhantomData;
+use ecc::maingate::{big_to_fe, fe_to_big};
 
-// pub fn field_to_bn<F: BaseExt>(f: &F) -> BigUint {
-//     let mut bytes: Vec<u8> = Vec::new();
-//     f.write(&mut bytes).unwrap();
-//     BigUint::from_bytes_le(&bytes[..])
-// }
-
-// pub fn bn_to_field<F: BaseExt>(bn: &BigUint) -> F {
-//     let mut bytes = bn.to_bytes_le();
-//     bytes.resize(32, 0);
-//     let mut bytes = &bytes[..];
-//     F::read(&mut bytes).unwrap()
-// }
-
-// fn base_to_scalar<B: BaseExt, S: BaseExt>(base: &B) -> S {
-//     let bn = field_to_bn(base);
-//     let modulus = field_to_bn(&-B::one()) + 1u64;
-//     let bn = bn % modulus;
-//     bn_to_field(&bn)
-// }
-
-// const POSEIDON_RATE: usize = 8usize;
-// const POSEIDON_T: usize = POSEIDON_RATE + 1usize;
+/// Convert the number from base field to scalar field of elliptic curve.
+fn base_to_scalar<C: CurveAffine>(x: C::Base) -> C::Scalar {
+	let x_big = fe_to_big(x);
+	big_to_fe(x_big)
+}
 
 // #[derive(Debug, Clone)]
 // pub struct PoseidonRead<R: Read, C: CurveAffine, E: EncodedChallenge<C>> {
@@ -74,7 +60,6 @@ use halo2_proofs::transcript::{Transcript, TranscriptRead, TranscriptWrite};
 //     for PoseidonRead<R, C, Challenge255<C>>
 // {
 //     fn squeeze_challenge(&mut self) -> Challenge255<C> {
-//         //self.state.update(&[PREFIX_SQUEEZE]);
 //         let scalar = self.state.squeeze();
 //         let mut bytes: Vec<u8> = Vec::new();
 //         scalar.write(&mut bytes).unwrap();
@@ -83,7 +68,6 @@ use halo2_proofs::transcript::{Transcript, TranscriptRead, TranscriptWrite};
 //     }
 
 //     fn common_point(&mut self, point: C) -> io::Result<()> {
-//         //self.state.update(&[PREFIX_POINT]);
 //         let coords: Coordinates<C> = Option::from(point.coordinates()).ok_or_else(|| {
 //             io::Error::new(
 //                 io::ErrorKind::Other,
@@ -148,7 +132,6 @@ use halo2_proofs::transcript::{Transcript, TranscriptRead, TranscriptWrite};
 //     for PoseidonWrite<W, C, Challenge255<C>>
 // {
 //     fn squeeze_challenge(&mut self) -> Challenge255<C> {
-//         //self.state.update(&[PREFIX_SQUEEZE]);
 //         let scalar = self.state.squeeze();
 //         let mut bytes: Vec<u8> = Vec::new();
 //         scalar.write(&mut bytes).unwrap();
@@ -172,7 +155,6 @@ use halo2_proofs::transcript::{Transcript, TranscriptRead, TranscriptWrite};
 //     }
 
 //     fn common_scalar(&mut self, scalar: C::Scalar) -> io::Result<()> {
-//         //self.state.update(&[BLAKE2B_PREFIX_SCALAR]);
 //         self.state.update(&[scalar]);
 
 //         Ok(())

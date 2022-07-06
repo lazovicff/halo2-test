@@ -1,7 +1,7 @@
 mod native;
 pub mod params;
 pub mod transcript;
-pub mod wrong;
+pub mod sponge;
 
 use halo2_proofs::{
     arithmetic::FieldExt,
@@ -25,7 +25,7 @@ pub struct PoseidonChip<F: FieldExt, const WIDTH: usize, P>
 where
     P: RoundParams<F, WIDTH>,
 {
-    inputs: [Option<F>; WIDTH],
+    inputs: [AssignedCell<F, F>; WIDTH],
     _params: PhantomData<P>,
 }
 
@@ -33,7 +33,7 @@ impl<F: FieldExt, const WIDTH: usize, P> PoseidonChip<F, WIDTH, P>
 where
     P: RoundParams<F, WIDTH>,
 {
-    fn new(inputs: [Option<F>; WIDTH]) -> Self {
+    fn new(inputs: [AssignedCell<F, F>; WIDTH]) -> Self {
         PoseidonChip {
             inputs,
             _params: PhantomData,
@@ -265,7 +265,7 @@ where
         let full_round_selector = meta.selector();
         let partial_round_selector = meta.selector();
 
-        meta.create_gate("full_round", |v_cells| {
+        meta.create_gate("poseidon_round", |v_cells| {
             let mut exprs = Self::apply_round_constants_expr(v_cells, &state, &round_constants);
             for i in 0..WIDTH {
                 exprs[i] = P::sbox_expr(exprs[i].clone());
@@ -282,13 +282,7 @@ where
         });
 
         meta.create_gate("partial_round", |v_cells| {
-            let mut exprs = [(); WIDTH].map(|_| Expression::Constant(F::zero()));
-            // Add round constants
-            for i in 0..WIDTH {
-                let curr_state = v_cells.query_advice(state[i], Rotation::cur());
-                let round_constant = v_cells.query_fixed(round_constants[i], Rotation::cur());
-                exprs[i] = curr_state + round_constant;
-            }
+            let mut exprs = Self::apply_round_constants_expr(v_cells, &state, &round_constants);
             exprs[0] = P::sbox_expr(exprs[0].clone());
 
             exprs = Self::apply_mds_expr(v_cells, &exprs, &mds);
@@ -312,9 +306,9 @@ where
         }
     }
 
-    fn synthesize(
+    fn permute(
         &self,
-        config: PoseidonConfig<WIDTH>,
+        config: &PoseidonConfig<WIDTH>,
         mut layouter: impl Layouter<F>,
     ) -> Result<[AssignedCell<F, F>; WIDTH], Error> {
         let full_rounds = P::full_rounds();
@@ -332,11 +326,6 @@ where
 
         let third_round_constants = &round_constants[second_round_end..total_count];
 
-        let init_state = layouter.assign_region(
-            || "load_state",
-            |mut region: Region<'_, F>| Self::load_state(&config, &mut region, 0, self.inputs),
-        )?;
-
         let state1 = layouter.assign_region(
             || "full_rounds_1",
             |mut region: Region<'_, F>| {
@@ -346,7 +335,7 @@ where
                     half_full_rounds,
                     first_round_constants,
                     &mds,
-                    &init_state,
+                    &self.inputs,
                 )
             },
         )?;
@@ -437,9 +426,19 @@ mod test {
             config: Self::Config,
             mut layouter: impl Layouter<Fr>,
         ) -> Result<(), Error> {
-            let poseidon = TestPoseidonChip::new(self.inputs);
+			let init_state = layouter.assign_region(
+				|| "load_state",
+				|mut region: Region<'_, Fr>| TestPoseidonChip::load_state(
+					&config.poseidon_config,
+					&mut region,
+					0,
+					self.inputs
+				),
+			)?;
+
+            let poseidon = TestPoseidonChip::new(init_state);
             let result_state =
-                poseidon.synthesize(config.poseidon_config, layouter.namespace(|| "poseidon"))?;
+                poseidon.permute(&config.poseidon_config, layouter.namespace(|| "poseidon"))?;
             for i in 0..5 {
                 layouter.constrain_instance(result_state[i].cell(), config.results, i)?;
             }

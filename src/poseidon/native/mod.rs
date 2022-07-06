@@ -1,3 +1,5 @@
+mod sponge;
+
 use super::params::RoundParams;
 use halo2_proofs::arithmetic::FieldExt;
 use std::marker::PhantomData;
