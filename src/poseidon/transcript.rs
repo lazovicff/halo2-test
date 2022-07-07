@@ -1,12 +1,12 @@
-use halo2_proofs::transcript::{Transcript, TranscriptRead, TranscriptWrite, Challenge255};
-use halo2_proofs::arithmetic::CurveAffine;
-use std::marker::PhantomData;
 use ecc::maingate::{big_to_fe, fe_to_big};
+use halo2_proofs::arithmetic::CurveAffine;
+use halo2_proofs::transcript::{Challenge255, Transcript, TranscriptRead, TranscriptWrite};
+use std::marker::PhantomData;
 
 /// Convert the number from base field to scalar field of elliptic curve.
 fn base_to_scalar<C: CurveAffine>(x: C::Base) -> C::Scalar {
-	let x_big = fe_to_big(x);
-	big_to_fe(x_big)
+    let x_big = fe_to_big(x);
+    big_to_fe(x_big)
 }
 
 // #[derive(Debug, Clone)]

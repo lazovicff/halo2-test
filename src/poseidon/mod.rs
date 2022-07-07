@@ -1,7 +1,7 @@
 mod native;
 pub mod params;
-pub mod transcript;
 pub mod sponge;
+pub mod transcript;
 
 use halo2_proofs::{
     arithmetic::FieldExt,
@@ -426,15 +426,17 @@ mod test {
             config: Self::Config,
             mut layouter: impl Layouter<Fr>,
         ) -> Result<(), Error> {
-			let init_state = layouter.assign_region(
-				|| "load_state",
-				|mut region: Region<'_, Fr>| TestPoseidonChip::load_state(
-					&config.poseidon_config,
-					&mut region,
-					0,
-					self.inputs
-				),
-			)?;
+            let init_state = layouter.assign_region(
+                || "load_state",
+                |mut region: Region<'_, Fr>| {
+                    TestPoseidonChip::load_state(
+                        &config.poseidon_config,
+                        &mut region,
+                        0,
+                        self.inputs,
+                    )
+                },
+            )?;
 
             let poseidon = TestPoseidonChip::new(init_state);
             let result_state =
