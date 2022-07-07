@@ -2,7 +2,7 @@ use halo2_proofs::arithmetic::FieldExt;
 use crate::poseidon::{RoundParams, native::Poseidon};
 use std::marker::PhantomData;
 
-struct PoseidonSponge<F: FieldExt, const WIDTH: usize, P>
+pub struct PoseidonSponge<F: FieldExt, const WIDTH: usize, P>
 where
     P: RoundParams<F, WIDTH>
 {
@@ -14,14 +14,14 @@ impl<F: FieldExt, const WIDTH: usize, P> PoseidonSponge<F, WIDTH, P>
 where
     P: RoundParams<F, WIDTH>
 {
-	fn new() -> Self {
+	pub fn new() -> Self {
 		Self {
 			inputs: Vec::new(),
 			_params: PhantomData
 		}
 	}
 
-	fn update(&mut self, inputs: [F; WIDTH]) {
+	pub fn update(&mut self, inputs: [F; WIDTH]) {
 		self.inputs.push(inputs);
 	}
 
