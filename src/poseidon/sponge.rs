@@ -86,19 +86,6 @@ where
         Ok(state.map(|item| item.unwrap()))
     }
 
-	fn load_chunks(
-		&self,
-		columns: [Column<Advice>; WIDTH],
-		region: &mut Region<'_, F>,
-	) -> Result<Vec<[AssignedCell<F, F>; WIDTH]>, Error> {
-		let mut chunks = Vec::new();
-		for (i, chunk) in self.inputs.chunks(WIDTH).enumerate() {
-			let state_chunk = Self::load_state(columns, region, i, chunk)?;
-			chunks.push(state_chunk);
-		}
-		Ok(chunks)
-	}
-
     fn update(&mut self, inputs: &[AssignedCell<F, F>]) {
         self.inputs.extend_from_slice(inputs);
     }
@@ -110,35 +97,27 @@ where
     ) -> Result<AssignedCell<F, F>, Error> {
         assert!(self.inputs.len() > 0);
 
-		let inputs = layouter.assign_region(
+		let mut state = layouter.assign_region(
 			|| "load_chunks",
-			|mut region: Region<'_, F>| self.load_chunks(config.state, &mut region)
+			|mut region: Region<'_, F>| Self::load_state(config.state, &mut region, 0, &[])
 		)?;
 
-        let mut state = inputs[0].clone();
-
-        for (i, chunk) in inputs.iter().skip(1).enumerate() {
-            let pos = PoseidonChip::<_, WIDTH, P>::new(state);
-            let perm_state = pos.permute(
-                &config.poseidon_config,
-                layouter.namespace(|| format!("absorb_{}", i)),
-            )?;
-
-            state = layouter.assign_region(
+        for (i, chunk) in self.inputs.chunks(WIDTH).enumerate() {
+			let inputs = layouter.assign_region(
                 || format!("absorb_{}", i),
                 |mut region: Region<'_, F>| {
                     let round = 0;
                     config.absorb_selector.enable(&mut region, round)?;
 
-                    let state = Self::load_state(config.state, &mut region, round, chunk)?;
-                    let poseidon_state = Self::load_state(
+                    let loaded_chunk = Self::load_state(config.state, &mut region, round, chunk)?;
+                    let loaded_state = Self::load_state(
                         config.poseidon_config.state,
                         &mut region,
                         round,
-                        &perm_state,
+                        &state,
                     )?;
 
-                    let next_state = state.zip(poseidon_state).zip(config.state).try_map(
+                    let next_state = loaded_chunk.zip(loaded_state).zip(config.state).try_map(
                         |((prev_state, pos_state), column)| {
                             let sum = prev_state
                                 .value()
@@ -154,6 +133,12 @@ where
 
                     Ok(next_state)
                 },
+            )?;
+
+            let pos = PoseidonChip::<_, WIDTH, P>::new(inputs);
+            state = pos.permute(
+                &config.poseidon_config,
+                layouter.namespace(|| format!("absorb_{}", i)),
             )?;
         }
 
