@@ -42,7 +42,7 @@ where
 
         let mut state = inputs[0];
 
-        for chunk in &inputs {
+        for chunk in inputs.iter().skip(1) {
             let pos = Poseidon::<_, WIDTH, P>::new(state);
             let perm_state = pos.permute();
             state = chunk.zip(perm_state).map(|(lhs, rhs)| lhs + rhs);

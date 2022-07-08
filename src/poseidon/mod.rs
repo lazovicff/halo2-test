@@ -1,7 +1,6 @@
 mod native;
 pub mod params;
 pub mod sponge;
-pub mod transcript;
 
 use halo2_proofs::{
     arithmetic::FieldExt,

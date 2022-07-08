@@ -117,7 +117,7 @@ where
 
         let mut state = inputs[0].clone();
 
-        for (i, chunk) in inputs.iter().enumerate() {
+        for (i, chunk) in inputs.iter().skip(1).enumerate() {
             let pos = PoseidonChip::<_, WIDTH, P>::new(state);
             let perm_state = pos.permute(
                 &config.poseidon_config,
