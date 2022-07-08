@@ -23,7 +23,7 @@ struct PoseidonSpongeChip<F: FieldExt, const WIDTH: usize, P>
 where
     P: RoundParams<F, WIDTH>,
 {
-    inputs: Vec<[AssignedCell<F, F>; WIDTH]>,
+    inputs: Vec<AssignedCell<F, F>>,
     _params: PhantomData<P>,
 }
 
@@ -73,17 +73,34 @@ where
         columns: [Column<Advice>; WIDTH],
         region: &mut Region<'_, F>,
         round: usize,
-        prev_state: [AssignedCell<F, F>; WIDTH],
+        prev_state: &[AssignedCell<F, F>],
     ) -> Result<[AssignedCell<F, F>; WIDTH], Error> {
         let mut state: [Option<AssignedCell<F, F>>; WIDTH] = [(); WIDTH].map(|_| None);
         for i in 0..WIDTH {
-            state[i] = Some(prev_state[i].copy_advice(|| "state", region, columns[i], round)?);
+			if let Some(cell) = prev_state.get(i) {
+				state[i] = Some(cell.copy_advice(|| "state", region, columns[i], round)?);
+			} else {
+				state[i] = Some(region.assign_advice(|| "state", columns[i], round, || Ok(F::zero()))?);
+			}
         }
         Ok(state.map(|item| item.unwrap()))
     }
 
-    fn update(&mut self, inputs: [AssignedCell<F, F>; WIDTH]) {
-        self.inputs.push(inputs);
+	fn load_chunks(
+		&self,
+		columns: [Column<Advice>; WIDTH],
+		region: &mut Region<'_, F>,
+	) -> Result<Vec<[AssignedCell<F, F>; WIDTH]>, Error> {
+		let mut chunks = Vec::new();
+		for (i, chunk) in self.inputs.chunks(WIDTH).enumerate() {
+			let state_chunk = Self::load_state(columns, region, i, chunk)?;
+			chunks.push(state_chunk);
+		}
+		Ok(chunks)
+	}
+
+    fn update(&mut self, inputs: &[AssignedCell<F, F>]) {
+        self.inputs.extend_from_slice(inputs);
     }
 
     pub fn squeeze(
@@ -93,9 +110,14 @@ where
     ) -> Result<AssignedCell<F, F>, Error> {
         assert!(self.inputs.len() > 0);
 
-        let mut state = self.inputs[0].clone();
+		let inputs = layouter.assign_region(
+			|| "load_chunks",
+			|mut region: Region<'_, F>| self.load_chunks(config.state, &mut region)
+		)?;
 
-        for (i, chunk) in self.inputs.iter().enumerate() {
+        let mut state = inputs[0].clone();
+
+        for (i, chunk) in inputs.iter().enumerate() {
             let pos = PoseidonChip::<_, WIDTH, P>::new(state);
             let perm_state = pos.permute(
                 &config.poseidon_config,
@@ -108,12 +130,12 @@ where
                     let round = 0;
                     config.absorb_selector.enable(&mut region, round)?;
 
-                    let state = Self::load_state(config.state, &mut region, round, chunk.clone())?;
+                    let state = Self::load_state(config.state, &mut region, round, chunk)?;
                     let poseidon_state = Self::load_state(
                         config.poseidon_config.state,
                         &mut region,
                         round,
-                        perm_state.clone(),
+                        &perm_state,
                     )?;
 
                     let next_state = state.zip(poseidon_state).zip(config.state).try_map(
@@ -150,7 +172,7 @@ mod test {
         circuit::{AssignedCell, Layouter, Region, SimpleFloorPlanner},
         dev::MockProver,
         pairing::bn256::Fr,
-        plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Instance},
+        plonk::{Circuit, Column, ConstraintSystem, Error, Instance},
     };
 
     type TestPoseidonSponge = PoseidonSponge<Fr, 5, Params5x5Bn254>;
@@ -240,8 +262,8 @@ mod test {
             )?;
 
             let mut poseidon_sponge = TestPoseidonSpongeChip::new();
-            poseidon_sponge.update(inputs1);
-            poseidon_sponge.update(inputs2);
+            poseidon_sponge.update(&inputs1);
+            poseidon_sponge.update(&inputs2);
             let result_state = poseidon_sponge
                 .squeeze(&config.sponge, layouter.namespace(|| "poseidon_sponge"))?;
 
@@ -271,8 +293,8 @@ mod test {
         .map(|n| hex_to_field(n));
 
         let mut sponge = TestPoseidonSponge::new();
-        sponge.update(inputs1);
-        sponge.update(inputs2);
+        sponge.update(&inputs1);
+        sponge.update(&inputs2);
 
         let native_result = sponge.squeeze();
 

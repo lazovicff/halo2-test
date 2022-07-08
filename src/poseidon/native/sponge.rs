@@ -6,7 +6,7 @@ pub struct PoseidonSponge<F: FieldExt, const WIDTH: usize, P>
 where
     P: RoundParams<F, WIDTH>,
 {
-    inputs: Vec<[F; WIDTH]>,
+    inputs: Vec<F>,
     _params: PhantomData<P>,
 }
 
@@ -21,16 +21,28 @@ where
         }
     }
 
-    pub fn update(&mut self, inputs: [F; WIDTH]) {
-        self.inputs.push(inputs);
+    pub fn update(&mut self, inputs: &[F]) {
+        self.inputs.extend_from_slice(inputs);
     }
+
+	pub fn load_chunks(&self) -> Vec<[F; WIDTH]> {
+		let mut chunks = Vec::new();
+		for chunk in self.inputs.chunks(WIDTH) {
+			let mut state_chunk = [F::zero(); WIDTH];
+			state_chunk[..chunk.len()].copy_from_slice(&chunk);
+			chunks.push(state_chunk);
+		}
+		chunks
+	}
 
     pub fn squeeze(&mut self) -> F {
         assert!(self.inputs.len() > 0);
 
-        let mut state = self.inputs[0];
+		let inputs = self.load_chunks();
 
-        for chunk in &self.inputs {
+        let mut state = inputs[0];
+
+        for chunk in &inputs {
             let pos = Poseidon::<_, WIDTH, P>::new(state);
             let perm_state = pos.permute();
             state = chunk.zip(perm_state).map(|(lhs, rhs)| lhs + rhs);
